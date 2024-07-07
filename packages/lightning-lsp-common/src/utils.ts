@@ -1,5 +1,5 @@
 import * as fs from 'fs-extra';
-import { basename, extname, join, relative, resolve } from 'path';
+import { basename, extname, join, relative, resolve, parse } from 'path';
 import { TextDocument, FileEvent, FileChangeType } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import equal from 'deep-equal';
@@ -69,6 +69,20 @@ export async function includesDeletedAuraWatchedDirectory(context: WorkspaceCont
     for (const event of changes) {
         if (event.type === FileChangeType.Deleted && event.uri.indexOf('.') === -1 && (await isAuraWatchedDirectory(context, event.uri))) {
             return true;
+        }
+    }
+    return false;
+}
+
+export async function includesCreatedLwcWatchedDirectory(context: WorkspaceContext, changes: FileEvent[]): Promise<boolean> {
+    for (const event of changes) {
+        if (event.type === FileChangeType.Created && (await isLWCWatchedDirectory(context, event.uri))) {
+            const file = toResolvedPath(event.uri);
+            const { dir, name, ext } = parse(file);
+            // Only update path mapping for newly created lwc modules
+            if (/.*(.ts|.js)$/.test(ext) && dir.endsWith(name)) {
+                return true;
+            }
         }
     }
     return false;

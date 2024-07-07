@@ -219,8 +219,11 @@ export default class Tag implements ITagData {
         if (file === '' || file.length === 0) {
             return null;
         }
-        const filePath = path.parse(file);
-        const fileName = filePath.base;
+        const { base: fileName, ext } = path.parse(file);
+        // jtu-todo: this might be an issue for core workspaces double check
+        if (ext === '.ts') {
+            return null;
+        }
         const data = await fs.readFile(file, 'utf-8');
         if (!(data.includes(`from "lwc"`) || data.includes(`from 'lwc'`))) {
             return null;

@@ -10,6 +10,12 @@ import {
     InitializeParams,
     TextDocumentPositionParams,
     CompletionParams,
+    NotificationHandler,
+    DidChangeWatchedFilesParams,
+    FileChangeType,
+    DidChangeConfigurationNotification,
+    MessageType,
+    ShowMessageNotification,
 } from 'vscode-languageserver';
 
 import {
@@ -34,6 +40,9 @@ import TypingIndexer from './typing-indexer';
 import templateLinter from './template/linter';
 import Tag from './tag';
 import { URI } from 'vscode-uri';
+import { WorkspaceType } from '@salesforce/lightning-lsp-common/lib/shared';
+import path, { basename, dirname, extname } from 'path';
+import { TYPESCRIPT_SUPPORT_SETTING } from './constants';
 
 export const propertyRegex = new RegExp(/\{(?<property>\w+)\.*.*\}/);
 export const iteratorRegex = new RegExp(/iterator:(?<name>\w+)/);
@@ -85,6 +94,8 @@ export default class Server {
         this.connection.onHover(this.onHover.bind(this));
         this.connection.onShutdown(this.onShutdown.bind(this));
         this.connection.onDefinition(this.onDefinition.bind(this));
+        this.connection.onInitialized(this.onInitialized.bind(this));
+        this.connection.onDidChangeWatchedFiles(this.onDidChangeWatchedFiles.bind(this));
 
         this.documents.listen(this.connection);
         this.documents.onDidChangeContent(this.onDidChangeContent.bind(this));
@@ -103,12 +114,38 @@ export default class Server {
             customDataProviders: [this.lwcDataProvider, this.auraDataProvider],
             useDefaultDataProvider: false,
         });
-
+        // this.connection.console.log('starting now james');
+        // this.connection.workspace.getConfiguration('salesforcedx-vscode-lwc').then(val => {
+        //     this.connection.console.log(val);
+        //     this.context.configureProject(val);
+        // });
+        // try {
+        //     const settings = await this.connection.workspace.getConfiguration();
+        //     // this.connection.console.log(JSON.stringify(settings));
+        //     // await this.context.configureProject(settings.preview.typeScriptSupport);
+        // } catch (err) {
+        //     this.connection.console.error(err.message);
+        // }
         await this.context.configureProject();
         await this.componentIndexer.init();
         this.typingIndexer.init();
 
         return this.capabilities;
+    }
+
+    async onInitialized(): Promise<void> {
+        // console.log('initialized');
+        // this.connection.client.register(DidChangeConfigurationNotification.type);
+        const hasTsEnabled = await this.isTsSupportEnabled();
+        // TODO: add onDidChangeConfiguration handler to detect changes in config value
+        if (hasTsEnabled) {
+            await this.context.configureProjectForTs();
+            await this.componentIndexer.updateSfdxTsConfigPath();
+        }
+    }
+
+    private async isTsSupportEnabled(): Promise<any> {
+        return this.connection.workspace.getConfiguration(TYPESCRIPT_SUPPORT_SETTING);
     }
 
     get capabilities(): InitializeResult {
@@ -131,6 +168,7 @@ export default class Server {
     }
 
     async onCompletion(params: CompletionParams): Promise<CompletionList> {
+        // this.connection.console.log('inside comppletion');
         const {
             position,
             textDocument: { uri },
@@ -151,6 +189,7 @@ export default class Server {
             }
         } else if (await this.context.isLWCJavascript(doc)) {
             if (this.shouldCompleteJavascript(params)) {
+                console.log(`this is the uri: ${uri}, this is the type: ${doc.languageId}`);
                 const customTags = this.componentIndexer.customData.map(tag => {
                     return {
                         label: tag.lwcTypingsName,
@@ -236,14 +275,28 @@ export default class Server {
         return this.languageService.doHover(doc, position, htmlDoc);
     }
 
+    async onDidChangeConfiguration(changeEvent: any): Promise<void> {
+        console.log('inside configuration change event');
+        // Note changeEvent will always = { settings: null }
+        // see https://github.com/microsoft/language-server-protocol/issues/1792
+        console.log(JSON.stringify(changeEvent));
+        // this.connection.console.log('inside did change configuration');
+        // const settings = await this.connection.workspace.getConfiguration('salesforcedx-vscode-lwc.preview.typeScriptSupport');
+        // this.connection.console.log(JSON.stringify(settings));
+    }
+
     async onDidChangeContent(changeEvent: any): Promise<void> {
+        this.connection.console.log('inside content changed');
         const { document } = changeEvent;
         const { uri } = document;
+        // const settings = await this.connection.workspace.getConfiguration('salesforcedx-vscode-lwc.preview.typeScriptSupport');
+        // this.connection.console.log(JSON.stringify(settings));
         if (await this.context.isLWCTemplate(document)) {
             const diagnostics = templateLinter(document);
             this.connection.sendDiagnostics({ uri, diagnostics });
         }
         if (await this.context.isLWCJavascript(document)) {
+            console.log(`this is the uri: ${uri}, this is the type: ${document.languageId}`);
             const { metadata, diagnostics } = await javascriptCompileDocument(document);
             this.connection.sendDiagnostics({ uri, diagnostics });
             if (metadata) {
@@ -255,10 +308,36 @@ export default class Server {
         }
     }
 
+    // TODO: Once the LWC custom module resolution plugin has been developed in the language server
+    // this can be removed.
+    async onDidChangeWatchedFiles(changeEvent: DidChangeWatchedFilesParams): Promise<void> {
+        if (this.context.type === WorkspaceType.SFDX) {
+            console.info('lwc onDidChangeWatchedFiles...');
+            try {
+                const hasTsEnabled = await this.isTsSupportEnabled();
+                if (hasTsEnabled) {
+                    const { changes } = changeEvent;
+                    const shouldUpdateSfdxTsConfigPathMapping =
+                        // File deleted
+                        utils.includesDeletedLwcWatchedDirectory(this.context, changes) || utils.includesCreatedLwcWatchedDirectory(this.context, changes);
+                    if (shouldUpdateSfdxTsConfigPathMapping) {
+                        this.componentIndexer.updateSfdxTsConfigPath();
+                    }
+                }
+            } catch (e) {
+                this.connection.sendNotification(ShowMessageNotification.type, {
+                    type: MessageType.Error,
+                    message: `Error updating tsconfig.sfdx.json path mapping: ${e.message}`,
+                });
+            }
+        }
+    }
+
     async onDidSave(change: TextDocumentChangeEvent): Promise<void> {
         const { document } = change;
         const { uri } = document;
         if (await this.context.isLWCJavascript(document)) {
+            console.log(`this is the uri: ${uri}, this is the type: ${document.languageId}`);
             const doc = await javascriptCompileDocument(document);
             const metadata: Metadata = doc.metadata;
             if (metadata) {

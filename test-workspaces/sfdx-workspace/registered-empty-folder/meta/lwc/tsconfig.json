@@ -1,0 +1,31 @@
+{
+    "compilerOptions": {
+        "paths": {
+            "c/*": [
+                "*"
+            ],
+            "c*": [
+                {
+                    "paths": []
+                }
+            ]
+        },
+        "target": "ESNext",
+        "allowJs": true,
+        "baseUrl": "./"
+    },
+    "include": [
+        "**/*",
+        "../../../.sfdx/typings/lwc/**/*.d.ts",
+        "**/*.ts"
+    ],
+    "typeAcquisition": {
+        "include": [
+            "jest"
+        ]
+    },
+    "extends": "../../../.sfdx/tsconfig.sfdx.json",
+    "exclude": [
+        "**/__tests__/**"
+    ]
+}

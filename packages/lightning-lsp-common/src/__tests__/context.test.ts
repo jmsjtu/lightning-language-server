@@ -1,5 +1,5 @@
 import * as fs from 'fs-extra';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { WorkspaceContext } from '../context';
 import { WorkspaceType } from '../shared';
 import {
@@ -196,10 +196,38 @@ it('configureSfdxProject()', async () => {
     expect(jsconfigUtils.include[2]).toBe('../../../.sfdx/typings/lwc/**/*.d.ts');
     expect(jsconfigForceApp.typeAcquisition).toEqual({ include: ['jest'] });
 
+    // //verify newly create tsconfig.json
+    // const tsconfigForceAppContent = fs.readFileSync(tsconfigPathForceApp, 'utf8');
+    // expect(tsconfigForceAppContent).toContain('    "compilerOptions": {'); // check formatting
+    // const tsconfigForceApp = JSON.parse(tsconfigForceAppContent);
+    // expect(tsconfigForceApp.compilerOptions.target).toBe('ESNext');
+    // expect(tsconfigForceApp.compilerOptions.allowJs).toBe(true);
+    // expect(tsconfigForceApp.compilerOptions.paths).toBeDefined();
+    // // jtu-todo: add a check for what paths should look like
+    // expect(tsconfigForceApp.include[0]).toBe('**/*');
+    // expect(tsconfigForceApp.include[1]).toBe('../../../../.sfdx/typings/lwc/**/*.d.ts');
+    // expect(tsconfigForceApp.compilerOptions.baseUrl).toBeUndefined(); // baseUrl/paths set when indexing
+    // expect(tsconfigForceApp.typeAcquisition).toEqual({ include: ['jest'] });
+
+    // // verify updated tsconfig.json
+    // const tsconfigUtilsContent = fs.readFileSync(tsconfigPathUtils, 'utf8');
+    // expect(tsconfigUtilsContent).toContain('    "compilerOptions": {'); // check formatting
+    // const tsconfigUtils = JSON.parse(tsconfigUtilsContent);
+    // expect(tsconfigUtils.compilerOptions.target).toBe('ESNext');
+    // expect(tsconfigForceApp.compilerOptions.allowJs).toBe(true);
+    // expect(tsconfigForceApp.compilerOptions.paths).toBeDefined();
+    // // jtu-todo: add a check for what paths should look like
+    // expect(tsconfigUtils.include[0]).toBe('util/*.js');
+    // expect(tsconfigUtils.include[1]).toBe('**/*');
+    // expect(tsconfigUtils.include[2]).toBe('../../../.sfdx/typings/lwc/**/*.d.ts');
+    // expect(tsconfigForceApp.typeAcquisition).toEqual({ include: ['jest'] });
+
     // .forceignore
     const forceignoreContent = fs.readFileSync(forceignorePath, 'utf8');
     expect(forceignoreContent).toContain('**/jsconfig.json');
+    expect(forceignoreContent).toContain('**/tsconfig.json');
     expect(forceignoreContent).toContain('**/.eslintrc.json');
+    expect(forceignoreContent).toContain('**/*.ts');
 
     // typings
     expect(join(sfdxTypingsPath, 'lds.d.ts')).toExist();
@@ -333,4 +361,41 @@ it('configureCoreAll()', async () => {
     // launch.json
     // const launchContent = fs.readFileSync(launchPath, 'utf8');
     // expect(launchContent).toContain('"name": "SFDC (attach)"');
+});
+
+it('configureProjectForTs()', async () => {
+    const context = new WorkspaceContext('test-workspaces/sfdx-workspace');
+    const baseTsconfigPathForceApp = 'test-workspaces/sfdx-workspace/.sfdx/tsconfig.sfdx.json';
+    const tsconfigPathForceApp = FORCE_APP_ROOT + '/lwc/tsconfig.json';
+    const forceignorePath = 'test-workspaces/sfdx-workspace/.forceignore';
+
+    // make sure no generated files are there from previous runs
+    fs.removeSync(baseTsconfigPathForceApp);
+    fs.removeSync(tsconfigPathForceApp);
+    fs.removeSync(forceignorePath);
+
+    // configure and verify typings/jsconfig after configuration:
+    await context.configureProjectForTs();
+
+    // verify tsconfig.sfdx.json
+    const baseTsConfigForceAppContent = fs.readJsonSync(baseTsconfigPathForceApp);
+    expect(baseTsConfigForceAppContent).toEqual({
+        typeAcquisition: {
+            include: ['jest'],
+        },
+        compilerOptions: {
+            target: 'ESNext',
+            paths: {
+                'c/*': [],
+            },
+        },
+    });
+
+    //verify newly create tsconfig.json
+    const tsconfigForceAppContent = fs.readJsonSync(tsconfigPathForceApp);
+    expect(tsconfigForceAppContent).toEqual({
+        extends: '../../../../.sfdx/tsconfig.sfdx.json',
+        include: ['**/*.ts', '../../../../.sfdx/typings/lwc/**/*.d.ts'],
+        exclude: ['**/__tests__/**'],
+    });
 });

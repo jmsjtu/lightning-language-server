@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "target": "ESNext"
+    },
+    "include": [
+        "util/*.js",
+        "**/*.ts",
+        "../../../.sfdx/typings/lwc/**/*.d.ts"
+    ],
+    "extends": "../../../.sfdx/tsconfig.sfdx.json",
+    "exclude": [
+        "**/__tests__/**"
+    ]
+}

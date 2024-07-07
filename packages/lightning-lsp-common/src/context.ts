@@ -80,6 +80,7 @@ async function findNamespaceRoots(root: string, maxDepth = 5): Promise<{ lwc: st
         for (const subdir of subdirs) {
             // Is a root if any subdir matches a name/name.js with name.js being a module
             const basename = path.basename(subdir);
+            // jtu-todo: this should look for '.ts' modules too if ff is enabled
             const modulePath = path.join(subdir, basename + '.js');
             if (fs.existsSync(modulePath)) {
                 // TODO: check contents for: from 'lwc'?
@@ -308,6 +309,14 @@ export class WorkspaceContext {
     }
 
     /**
+     * Configures LWC project to support TypeScript
+     */
+    // TODO: Move this to configureProject post dev preview
+    public async configureProjectForTs(): Promise<void> {
+        await this.writeTsconfigJson();
+    }
+
+    /**
      * Acquires list of absolute modules directories, optimizing for workspace type
      * @returns Promise
      */
@@ -341,6 +350,35 @@ export class WorkspaceContext {
         }
         return list;
     }
+
+    // /**
+    //  * Acquires list of absolute modules directories, optimizing for workspace type
+    //  * @returns Promise
+    //  */
+    // public async getTsModulesDirs(): Promise<string[]> {
+    //     const wsDirs = new Set<string>();
+    //     switch (this.type) {
+    //         case WorkspaceType.SFDX:
+    //             const { sfdxPackageDirsPattern } = await this.getSfdxProjectConfig();
+    //             const wsTsFiles = await utils.glob(`${sfdxPackageDirsPattern}/**/lwc/**/*.ts`, {
+    //                 cwd: this.workspaceRoots[0],
+    //                 ignore: {
+    //                     ignored: (p: Path): boolean => {
+    //                         // Only match if the file name matches the parent folder name
+    //                         return !p.isNamed(p.parent.name + '.ts');
+    //                     },
+    //                 },
+    //             });
+    //             for (const wsTsFile of wsTsFiles) {
+    //                 const wsDir = path.join(path.dirname(path.dirname(wsTsFile)));
+    //                 if (!wsDirs.has(wsTsFile)) {
+    //                     wsDirs.add(wsDir);
+    //                 }
+    //             }
+    //             break;
+    //     }
+    //     return Array.from(wsDirs);
+    // }
 
     private async initSfdxProject(): Promise<SfdxProjectConfig> {
         const sfdxProjectConfig = await readSfdxProjectConfig(this.workspaceRoots[0]);
@@ -414,6 +452,7 @@ export class WorkspaceContext {
 
         switch (this.type) {
             case WorkspaceType.SFDX:
+                // await this.writeSfdxConfigJson('jsconfig-sfdx.json', 'jsconfig.json');
                 jsConfigTemplate = await fs.readFile(utils.getSfdxResource('jsconfig-sfdx.json'), 'utf8');
                 const forceignore = path.join(this.workspaceRoots[0], '.forceignore');
                 for (const modulesDir of modulesDirs) {
@@ -448,6 +487,42 @@ export class WorkspaceContext {
                 break;
         }
     }
+
+    private async writeTsconfigJson(): Promise<void> {
+        switch (this.type) {
+            case WorkspaceType.SFDX:
+                // Write tsconfig.sfdx.json first
+                const baseTsConfigPath = path.join(this.workspaceRoots[0], '.sfdx', 'tsconfig.sfdx.json');
+                const baseTsConfig = await fs.readFile(utils.getSfdxResource('tsconfig-sfdx.base.json'), 'utf8');
+                this.updateConfigFile(baseTsConfigPath, baseTsConfig);
+                // Write to the tsconfig.json in each module subdirectory
+                const tsConfigTemplate = await fs.readFile(utils.getSfdxResource('tsconfig-sfdx.json'), 'utf8');
+                const forceignore = path.join(this.workspaceRoots[0], '.forceignore');
+                // TODO: We should only be looking through modules that have TS files
+                const modulesDirs = await this.getModulesDirs();
+                for (const modulesDir of modulesDirs) {
+                    const tsConfigPath = path.join(modulesDir, 'tsconfig.json');
+                    const relativeWorkspaceRoot = utils.relativePath(path.dirname(tsConfigPath), this.workspaceRoots[0]);
+                    const tsConfigContent = this.processTemplate(tsConfigTemplate, { project_root: relativeWorkspaceRoot });
+                    this.updateConfigFile(tsConfigPath, tsConfigContent);
+                    await this.updateForceIgnoreFile(forceignore);
+                }
+                break;
+        }
+    }
+
+    // private async writeSfdxConfigJson(configTemplateName: string, configName: string): Promise<void> {
+    //     const configTemplate = await fs.readFile(utils.getSfdxResource(configTemplateName), 'utf8');
+    //     const forceignore = path.join(this.workspaceRoots[0], '.forceignore');
+    //     const modulesDirs = await this.getModulesDirs();
+    //     for (const modulesDir of modulesDirs) {
+    //         const configPath = path.join(modulesDir, configName);
+    //         const relativeWorkspaceRoot = utils.relativePath(path.dirname(configPath), this.workspaceRoots[0]);
+    //         const configContent = this.processTemplate(configTemplate, { project_root: relativeWorkspaceRoot });
+    //         this.updateConfigFile(configPath, configContent);
+    //         await this.updateForceIgnoreFile(forceignore);
+    //     }
+    // }
 
     private async writeSettings(): Promise<void> {
         switch (this.type) {
@@ -557,7 +632,9 @@ export class WorkspaceContext {
 
     private async updateForceIgnoreFile(ignoreFile: string): Promise<void> {
         await utils.appendLineIfMissing(ignoreFile, '**/jsconfig.json');
+        await utils.appendLineIfMissing(ignoreFile, '**/tsconfig.json');
         await utils.appendLineIfMissing(ignoreFile, '**/.eslintrc.json');
+        await utils.appendLineIfMissing(ignoreFile, '**/*.ts');
     }
 
     /**
